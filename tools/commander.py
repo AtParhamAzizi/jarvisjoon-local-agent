@@ -9,11 +9,23 @@ def execute_command(
     timeout: int = 30,
 ) -> ToolResult:
 
+    if not isinstance(command, list) or not command or not all(
+        isinstance(argument, str) for argument in command
+    ):
+        return ToolResult(
+            ok=False,
+            data={},
+            error_type="invalid_command",
+            message="command must be a nonempty list of strings.",
+        )
+
     result = subprocess.run(
         command,
         cwd=workspace.root,
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         timeout=timeout,
     )
 

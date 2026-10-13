@@ -36,9 +36,8 @@ class ToolRegistry:
         Any exception raised by the tool is caught and converted into a
         failed ToolResult, so callers get a consistent return shape.
         """
-        tool = self.get(name)
-
         try:
+            tool = self.get(name)
             return tool.execute(**arguments)
         except Exception as e:
             return ToolResult(

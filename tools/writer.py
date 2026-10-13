@@ -12,7 +12,8 @@ def write_file(
     file_path.parent.mkdir(parents=True, exist_ok=True)
 
     # Write the content as UTF-8, overwriting any existing file.
-    file_path.write_text(content, encoding="utf-8")
+    with file_path.open("w", encoding="utf-8", newline="") as handle:
+        handle.write(content)
 
     return ToolResult(
         ok=True,

@@ -152,7 +152,7 @@ def search_files(
 
     for file_path in files:
 
-        if len(matches) >= max_results:
+        if len(matches) > max_results:
             break
 
         # Resolve every candidate too: a symlink inside the workspace could
@@ -192,7 +192,7 @@ def search_files(
                     }
                 )
 
-                if len(matches) >= max_results:
+                if len(matches) > max_results:
                     break
 
     return ToolResult(
@@ -201,9 +201,9 @@ def search_files(
             "query": query,
             "path": path,
             "case_sensitive": case_sensitive,
-            "matches": matches,
-            "count": len(matches),
-            "truncated": len(matches) >= max_results,
+            "matches": matches[:max_results],
+            "count": min(len(matches), max_results),
+            "truncated": len(matches) > max_results,
         },
     )
 
@@ -283,7 +283,7 @@ def find_files(
 
     for file_path in candidates:
 
-        if len(results) >= max_results:
+        if len(results) > max_results:
             break
 
         if not file_path.is_file():
@@ -291,18 +291,19 @@ def find_files(
 
         try:
             relative_path = file_path.resolve().relative_to(workspace.root)
-        except ValueError:
+        except (OSError, ValueError):
             # Path isn't under the workspace root; skip it.
             continue
 
-        if _should_ignore(relative_path):
+        if _should_ignore(file_path.relative_to(workspace.root)) or _should_ignore(relative_path):
             continue
 
         if fnmatch.fnmatch(file_path.name, pattern):
             results.append(str(relative_path))
 
     # Return results in a stable, sorted order.
-    results.sort()
+    truncated = len(results) > max_results
+    results = sorted(results[:max_results])
 
     return ToolResult(
         ok=True,
@@ -311,6 +312,6 @@ def find_files(
             "path": path,
             "files": results,
             "count": len(results),
-            "truncated": len(results) >= max_results,
+            "truncated": truncated,
         },
     )

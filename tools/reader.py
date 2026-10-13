@@ -26,6 +26,14 @@ def read_file(
 
 
 
+    if start_line < 1 or (end_line is not None and end_line < start_line):
+        return ToolResult(
+            ok=False,
+            data={},
+            error_type="invalid_line_range",
+            message="Line numbers must be positive and end_line must not precede start_line.",
+        )
+
     file_path = workspace.resolve(path)
 
     if not file_path.exists():
@@ -46,9 +54,10 @@ def read_file(
 
 
     # read as txt UTF-8 file
-    text = file_path.read_text(encoding="utf-8", errors="replace")
+    with file_path.open("r", encoding="utf-8", newline="") as handle:
+        text = handle.read()
 
-    lines = text.splitlines()
+    lines = text.splitlines(keepends=True)
 
     start = max(start_line - 1, 0)
 
@@ -63,6 +72,6 @@ def read_file(
             "path": path,
             "start_line": start + 1,
             "end_line": start + len(selected),
-            "content": "\n".join(selected),
+            "content": "".join(selected),
         },
     )

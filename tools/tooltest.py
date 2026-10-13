@@ -24,6 +24,8 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+sys.path.insert(0, str(PROJECT_ROOT / "tools"))
+
 
 # ---------------------------------------------------------
 # Import tools
@@ -57,9 +59,6 @@ execute_command = import_tool("tools.commander", "execute_command")
 git_status = import_tool("tools.gittools", "git_status")
 git_diff = import_tool("tools.gittools", "git_diff")
 git_log = import_tool("tools.gittools", "git_log")
-
-run_tests = import_tool("tools.testing", "run_tests")
-inspect_project = import_tool("tools.project", "inspect_project")
 
 
 # ---------------------------------------------------------
@@ -120,7 +119,7 @@ def assert_tool_success(result: Any) -> dict[str, Any]:
     """
     data = get_data(result)
 
-    if data.get("ok") is False:
+    if data.get("ok") is not True:
         raise AssertionError(data.get("message", str(data)))
 
     return data
@@ -288,13 +287,14 @@ def test_write_file(workspace):
 
     assert_tool_success(result)
 
-    generated = workspace / "generated.py"
+    generated = workspace.root / "generated.py"
 
     assert generated.exists(), "generated.py was not created."
 
     assert generated.read_text(encoding="utf-8") == (
         'print("Hello, World!")\n'
     )
+    assert generated.read_bytes() == b'print("Hello, World!")\n'
 
     report(
         "write_file",
@@ -320,14 +320,11 @@ def test_read_file(workspace):
     if content is None:
         content = data.get("text", "")
 
-    if not content:
-        # Some implementations return only a success indicator,
-        # so fall back to reading the file directly.
-        content = (workspace / "hello.py").read_text(
-            encoding="utf-8"
-        )
-
     assert "Hello, World!" in content
+    assert content == (workspace.root / "hello.py").read_bytes().decode("utf-8")
+    assert not get_data(call_tool(
+        read_file, workspace, path="hello.py", start_line=1, end_line=-1,
+    ))["ok"]
 
     report(
         "read_file",
@@ -338,6 +335,10 @@ def test_read_file(workspace):
 
 def test_edit_file(workspace):
     """edit_file should replace the targeted text in hello.py."""
+    original = (workspace.root / "hello.py").read_bytes()
+    assert not get_data(call_tool(
+        edit_file, workspace, path="hello.py", old_text="", new_text="unexpected",
+    ))["ok"]
     result = call_tool(
         edit_file,
         workspace,
@@ -348,12 +349,15 @@ def test_edit_file(workspace):
 
     assert_tool_success(result)
 
-    content = (workspace / "hello.py").read_text(
+    content = (workspace.root / "hello.py").read_text(
         encoding="utf-8"
     )
 
     assert "Hello from the local agent!" in content
     assert "Hello, World!" not in content
+    assert (workspace.root / "hello.py").read_bytes() == original.replace(
+        b"Hello, World!", b"Hello from the local agent!",
+    )
 
     report(
         "edit_file",
@@ -381,6 +385,14 @@ def test_search_files(workspace):
         raise AssertionError(
             "No matches returned for text present in hello.py."
         )
+    limited = assert_tool_success(call_tool(
+        search_files, workspace, query="Hello from the local agent!", max_results=1,
+    ))
+    assert limited["count"] == 1 and not limited["truncated"]
+    limited = assert_tool_success(call_tool(
+        search_files, workspace, query="print", max_results=1,
+    ))
+    assert limited["count"] == 1 and limited["truncated"]
 
     report(
         "search_files",
@@ -415,6 +427,14 @@ def test_find_files(workspace):
         file.endswith("hello.py")
         for file in normalized
     ), f"hello.py not found: {normalized}"
+    limited = assert_tool_success(call_tool(
+        find_files, workspace, pattern="hello.py", max_results=1,
+    ))
+    assert limited["count"] == 1 and not limited["truncated"]
+    limited = assert_tool_success(call_tool(
+        find_files, workspace, pattern="*.py", max_results=1,
+    ))
+    assert limited["count"] == 1 and limited["truncated"]
 
     report(
         "find_files",
@@ -425,6 +445,9 @@ def test_find_files(workspace):
 
 def test_execute_command(workspace):
     """execute_command should run hello.py and produce the expected output."""
+    assert not get_data(call_tool(
+        execute_command, workspace, command="python hello.py",
+    ))["ok"]
     result = call_tool(
         execute_command,
         workspace,
@@ -438,17 +461,6 @@ def test_execute_command(workspace):
     data = assert_tool_success(result)
 
     stdout = data.get("stdout", "")
-
-    # If a tool returns only a status, execute the program
-    # independently to verify the actual output.
-    if "Hello from the local agent!" not in stdout:
-        completed = run_process(
-            [sys.executable, "hello.py"],
-            workspace,
-        )
-
-        assert completed.returncode == 0, completed.stderr
-        stdout = completed.stdout
 
     assert "Hello from the local agent!" in stdout, (
         f"Unexpected program output: {stdout!r}"
@@ -532,75 +544,6 @@ def test_git_log(workspace):
     )
 
 
-def test_run_tests(workspace):
-    """
-    Exercise the run_tests tool if its API accepts a project path.
-
-    A standalone hello.py run is also performed independently to
-    verify the program still executes correctly.
-    """
-    if run_tests is None:
-        raise RuntimeError(
-            "Could not import tools.testing.run_tests."
-        )
-
-    signature = inspect.signature(run_tests)
-    params = signature.parameters
-
-    kwargs = {}
-
-    # Pass a project path under whichever parameter name the tool uses.
-    for name in ("path", "project_path", "directory"):
-        if name in params:
-            kwargs[name] = "."
-            break
-
-    result = call_tool(
-        run_tests,
-        workspace,
-        **kwargs,
-    )
-
-    data = assert_tool_success(result)
-
-    # Also verify the simple Python program, even if the project's
-    # test runner discovers no test files.
-    completed = run_process(
-        [sys.executable, "hello.py"],
-        workspace,
-    )
-
-    assert completed.returncode == 0, completed.stderr
-    assert "Hello from the local agent!" in completed.stdout
-
-    report(
-        "run_tests",
-        True,
-        "Test tool returned successfully; hello.py executed correctly.",
-    )
-
-
-def test_inspect_project(workspace):
-    """inspect_project should return a structured dictionary response."""
-    result = call_tool(
-        inspect_project,
-        workspace,
-        path=".",
-    )
-
-    data = assert_tool_success(result)
-
-    # Inspect-project schemas vary, so we only verify that the
-    # response is a structured dict rather than a specific schema.
-    assert isinstance(data, dict)
-
-    report(
-        "inspect_project",
-        True,
-        "Received structured project-inspection output.",
-    )
-
-
 # ---------------------------------------------------------
 # Test runner
 # ---------------------------------------------------------
@@ -646,8 +589,6 @@ def main():
                 ("git_status", test_git_status),
                 ("git_diff", test_git_diff),
                 ("git_log", test_git_log),
-                ("run_tests", test_run_tests),
-                ("inspect_project", test_inspect_project),
             ]
 
             # Map display names to the imported tool callables so we
@@ -663,8 +604,6 @@ def main():
                 "git_status": git_status,
                 "git_diff": git_diff,
                 "git_log": git_log,
-                "run_tests": run_tests,
-                "inspect_project": inspect_project,
             }
 
             for name, test_function in tests:

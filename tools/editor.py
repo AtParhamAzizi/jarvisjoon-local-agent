@@ -17,7 +17,16 @@ def edit_file(
             message=f"File does not exist: {path}",
         )
 
-    content = file_path.read_text(encoding="utf-8")
+    if not old_text:
+        return ToolResult(
+            ok=False,
+            data={},
+            error_type="invalid_old_text",
+            message="The text to replace cannot be empty.",
+        )
+
+    with file_path.open("r", encoding="utf-8", newline="") as handle:
+        content = handle.read()
 
     count = content.count(old_text)
 
@@ -40,7 +49,8 @@ def edit_file(
 
     new_content = content.replace(old_text, new_text, 1)
 
-    file_path.write_text(new_content, encoding="utf-8")
+    with file_path.open("w", encoding="utf-8", newline="") as handle:
+        handle.write(new_content)
 
     return ToolResult(
         ok=True,
